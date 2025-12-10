@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
+  <title>EPUB Viewer</title>
+  <style>
+    html,body { height:100%; margin:0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; }
+    #viewer { height:100vh; display:flex; flex-direction:column; background:#f7f7f7; }
+    #toolbar { display:flex; gap:8px; padding:8px; align-items:center; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,0.06); z-index:5; }
+    #tocBtn, #prev, #next, #fit, #fontMinus, #fontPlus { padding:6px 10px; border-radius:6px; border:1px solid #ddd; background:#fff; cursor:pointer; }
+    #search { margin-left:auto; display:flex; gap:6px; align-items:center; }
+    #renderview { flex:1; overflow:auto; }
+    #renderview iframe { width:100%; height:100%; border:0; }
+    #viewer .loading { display:flex; align-items:center; justify-content:center; height:calc(100vh - 56px); color:#666; font-size:16px; }
+    /* Make contents responsive */
+    .epub-container { height:100%; }
+  </style>
+  <!-- epub.js from CDN -->
+  <script src="https://unpkg.com/epubjs/dist/epub.min.js"></script>
+</head>
+<body>
+  <div id="viewer">
+    <div id="toolbar">
+      <button id="tocBtn">☰ TOC</button>
+      <button id="prev">◀ Prev</button>
+      <button id="next">Next ▶</button>
+      <button id="fit">Toggle Scroll</button>
+      <span style="margin-left:8px">Font:</span>
+      <button id="fontMinus">A-</button>
+      <button id="fontPlus">A+</button>
+
+      <div id="search">
+        <input id="q" placeholder="Search text…" style="padding:6px 8px; border-radius:6px; border:1px solid #ddd" />
+        <button id="searchBtn" style="padding:6px 10px; border-radius:6px; border:1px solid #ddd">Find</button>
+      </div>
+    </div>
+
+    <div id="renderview">
+      <div class="loading">Loading book…</div>
+    </div>
+  </div>
+
+  <script>
+    // === BOOK SOURCE ===
+    const defaultBook = "https://drive.google.com/uc?export=download&id=1pzizfHT0-Cz2TUxAvcDnCud4QU8mK4Bz";
+
+    // If user sets ?book= url param, use that, otherwise use defaultBook
+    function getQueryParam(name) {
+      const params = new URLSearchParams(location.search);
+      return params.get(name);
+    }
+    const bookUrl = getQueryParam('book') || defaultBook;
+
+    // instantiate epub.js Book & Rendition
+    const book = ePub(bookUrl);
+    const rendition = book.renderTo("renderview", {
+      width: "100%",
+      height: "100%",
+      spread: "none",
+      manager: "continuous"
+    });
+
+    // default font size
+    let fontSize = 100; // percent
+
+    rendition.themes.default({
+      "body": {
+        "font-size": fontSize + "%"
+      }
+    });
+
+    // display first chapter
+    rendition.display();
+
+    // toolbar controls
+    document.getElementById('next').addEventListener('click', ()=> rendition.next());
+    document.getElementById('prev').addEventListener('click', ()=> rendition.prev());
+
+    // TOC button - show table of contents in a simple prompt
+    document.getElementById('tocBtn').addEventListener('click', async ()=> {
+      const toc = await book.loaded.navigation;
+      if (!toc || toc.toc.length === 0) { alert("No TOC available."); return; }
+      const items = toc.toc.map((t,i)=> (i+1)+". "+ t.label).join("\\n");
+      const choice = prompt("Table of contents:\\n\\n" + items + "\\n\\nEnter chapter number to go to:");
+      const n = parseInt(choice);
+      if (!isNaN(n) && n >= 1 && n <= toc.toc.length) {
+        rendition.display(toc.toc[n-1].href);
+      }
+    });
+
+    // toggle continuous vs paged (simple toggle)
+    let continuous = true;
+    document.getElementById('fit').addEventListener('click', ()=> {
+      continuous = !continuous;
+      rendition.themes.default({"body": {"font-size": fontSize + "%"}});
+      rendition.destroy();
+      book.renderTo("renderview", {
+        width: "100%",
+        height: "100%",
+        spread: continuous ? "none" : "always",
+        manager: continuous ? "continuous" : "default"
+      });
+      rendition.display();
+    });
+
+    // font size controls
+    document.getElementById('fontPlus').addEventListener('click', ()=> {
+      fontSize = Math.min(200, fontSize + 10);
+      rendition.themes.default({"body": {"font-size": fontSize + "%"}});
+    });
+    document.getElementById('fontMinus').addEventListener('click', ()=> {
+      fontSize = Math.max(50, fontSize - 10);
+      rendition.themes.default({"body": {"font-size": fontSize + "%"}});
+    });
+
+    // search (simple)
+    document.getElementById('searchBtn').addEventListener('click', ()=> {
+      const q = document.getElementById('q').value.trim();
+      if (!q) return alert("Enter search text.");
+      book.find(q).then(results => {
+        if (!results || results.length === 0) return alert("No matches found.");
+        const loc = results[0].cfi;
+        rendition.display(loc);
+      }).catch(e=>{
+        console.error(e);
+        alert("Search failed.");
+      });
+    });
+
+    // show loading -> remove once rendered
+    book.ready.then(()=> {
+      const el = document.querySelector("#renderview .loading");
+      if (el) el.remove();
+    }).catch(e=>{
+      console.error(e);
+      const el = document.querySelector("#renderview .loading");
+      el && (el.textContent = "Failed to load book. Check URL/sharing & CORS.");
+    });
+
+    // handle errors (CORS or not public)
+    book.spine.then(()=>{}).catch(err=>{
+      console.error("Book load error:", err);
+    });
+  </script>
+</body>
+</html>
